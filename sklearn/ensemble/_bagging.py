@@ -68,7 +68,7 @@ def _generate_bagging_indices(
 
 
 def _parallel_build_estimators(
-    n_estimators, ensemble, X, y, sample_weight, seeds, total_n_estimators, verbose
+    n_estimators, ensemble, X, y, sample_weight, seeds, total_n_estimators, chol_eps, idx_tr, verbose
 ):
     """Private function used to build a batch of estimators within a job."""
     # Retrieve settings
@@ -84,6 +84,9 @@ def _parallel_build_estimators(
     # Build estimators
     estimators = []
     estimators_features = []
+    ### KF:
+    eps_list = []
+    ###
 
     for i in range(n_estimators):
         if verbose > 1:
@@ -113,14 +116,32 @@ def _parallel_build_estimators(
             else:
                 curr_sample_weight = sample_weight.copy()
 
-            if bootstrap:
-                sample_counts = np.bincount(indices, minlength=n_samples)
-                curr_sample_weight *= sample_counts
-            else:
-                not_indices_mask = ~indices_to_mask(indices, n_samples)
-                curr_sample_weight[not_indices_mask] = 0
+            ### KF:
+            # if bootstrap:
+            #     sample_counts = np.bincount(indices, minlength=n_samples)
+            #     curr_sample_weight *= sample_counts
+            # else:
+            #     not_indices_mask = ~indices_to_mask(indices, n_samples)
+            #     curr_sample_weight[not_indices_mask] = 0
 
-            estimator.fit(X[:, features], y, sample_weight=curr_sample_weight)
+            # estimator.fit(X[:, features], y, sample_weight=curr_sample_weight)
+
+            if chol_eps is None:
+                eps = np.random.randn(n_samples,1)
+            else:
+                eps = np.random.randn(chol_eps.shape[0],1)
+                eps = chol_eps @ eps
+
+            if idx_tr is None:
+                eps_tr = eps
+            else:
+                eps_tr = eps[idx_tr]
+
+            w = y.reshape((-1,1)) + eps_tr
+
+            estimator.fit(X, w, y, sample_weight=curr_sample_weight, check_input=True)
+            eps_list.append(eps)
+            ###
 
         else:
             estimator.fit((X[indices])[:, features], y[indices])
@@ -128,7 +149,7 @@ def _parallel_build_estimators(
         estimators.append(estimator)
         estimators_features.append(features)
 
-    return estimators, estimators_features
+    return estimators, estimators_features, eps_list
 
 
 def _parallel_predict_proba(estimators, estimators_features, X, n_classes):
@@ -247,7 +268,7 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
         self.random_state = random_state
         self.verbose = verbose
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, chol_eps=None, idx_tr=None, sample_weight=None):
         """Build a Bagging ensemble of estimators from the training set (X, y).
 
         Parameters
@@ -279,12 +300,14 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
             force_all_finite=False,
             multi_output=True,
         )
-        return self._fit(X, y, self.max_samples, sample_weight=sample_weight)
+        ### KF:
+        return self._fit(X, y, chol_eps=chol_eps, idx_tr=idx_tr, max_samples=self.max_samples, sample_weight=sample_weight)
+        ###
 
     def _parallel_args(self):
         return {}
 
-    def _fit(self, X, y, max_samples=None, max_depth=None, sample_weight=None):
+    def _fit(self, X, y, chol_eps=None, idx_tr=None, max_samples=None, max_depth=None, sample_weight=None):
         """Build a Bagging ensemble of estimators from the training
            set (X, y).
 
@@ -373,6 +396,9 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
             # Free allocated memory, if any
             self.estimators_ = []
             self.estimators_features_ = []
+            ### KF:
+            self.eps_ = []
+            ###
 
         n_more_estimators = self.n_estimators - len(self.estimators_)
 
@@ -415,6 +441,10 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
                 sample_weight,
                 seeds[starts[i] : starts[i + 1]],
                 total_n_estimators,
+                ### KF:
+                chol_eps=chol_eps,
+                idx_tr=idx_tr,
+                ###
                 verbose=self.verbose,
             )
             for i in range(n_jobs)
@@ -427,6 +457,11 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
         self.estimators_features_ += list(
             itertools.chain.from_iterable(t[1] for t in all_results)
         )
+        ### KF:
+        self.eps_ += list(
+            itertools.chain.from_iterable(t[2] for t in all_results)
+        )
+        ###
 
         if self.oob_score:
             self._set_oob_score(X, y)

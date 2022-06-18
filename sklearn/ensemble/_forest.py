@@ -160,18 +160,49 @@ def _parallel_build_trees(
     verbose=0,
     class_weight=None,
     n_samples_bootstrap=None,
+    ### KF:
+    chol_eps=None,
+    idx_tr=None,
+    bootstrap_type='blur',
+    ###
 ):
     """
     Private function used to fit a single tree in parallel."""
     if verbose > 1:
         print("building tree %d of %d" % (tree_idx + 1, n_trees))
 
+    ### KF:
     if bootstrap:
         n_samples = X.shape[0]
         if sample_weight is None:
             curr_sample_weight = np.ones((n_samples,), dtype=np.float64)
         else:
             curr_sample_weight = sample_weight.copy()
+
+        if bootstrap_type == 'blur':
+            n_samples = X.shape[0]
+            if sample_weight is None:
+                curr_sample_weight = np.ones((n_samples,), dtype=np.float64)
+            else:
+                curr_sample_weight = sample_weight.copy()
+
+            if chol_eps is None:
+                eps = np.random.randn(n_samples,1)
+            else:
+                eps = np.random.randn(chol_eps.shape[0],1)
+                eps = chol_eps @ eps
+
+            if idx_tr is None:
+                eps_tr = eps
+            else:
+                eps_tr = eps[idx_tr]
+
+
+            w = y + eps_tr
+
+
+            tree.fit(X, w, sample_weight=curr_sample_weight, check_input=True)
+            return tree, eps
 
         indices = _generate_sample_indices(
             tree.random_state, n_samples, n_samples_bootstrap
@@ -187,10 +218,13 @@ def _parallel_build_trees(
             curr_sample_weight *= compute_sample_weight("balanced", y, indices=indices)
 
         tree.fit(X, y, sample_weight=curr_sample_weight, check_input=False)
+
+        return tree
     else:
         tree.fit(X, y, sample_weight=sample_weight, check_input=False)
 
-    return tree
+        return tree
+    ###
 
 
 class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
@@ -298,7 +332,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
 
         return sparse_hstack(indicators).tocsr(), n_nodes_ptr
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, sample_weight=None, chol_eps=None, idx_tr=None, bootstrap_type=None):
         """
         Build a forest of trees from the training set (X, y).
 
@@ -442,6 +476,11 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
             # Free allocated memory, if any
             self.estimators_ = []
 
+        ### KF:
+        if bootstrap_type == 'blur' and not hasattr(self, "eps_"):
+            self.eps_ = []
+        ###
+
         n_more_estimators = self.n_estimators - len(self.estimators_)
 
         if n_more_estimators < 0:
@@ -489,9 +528,20 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
                     verbose=self.verbose,
                     class_weight=self.class_weight,
                     n_samples_bootstrap=n_samples_bootstrap,
+                    ### KF:
+                    chol_eps=chol_eps,
+                    idx_tr=idx_tr,
+                    bootstrap_type=bootstrap_type,
+                    ###
                 )
                 for i, t in enumerate(trees)
             )
+
+            ### KF:
+            if bootstrap_type == 'blur':
+                trees, eps = zip(*trees)
+                self.eps_.extend(eps)
+            ###
 
             # Collect newly grown trees
             self.estimators_.extend(trees)
