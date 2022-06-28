@@ -481,6 +481,8 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
             self.estimators_ = []
 
         ### KF:
+        self.chol_eps = chol_eps
+
         if self.bootstrap_type == 'blur' and not hasattr(self, "eps_"):
             self.eps_ = []
         ###
@@ -533,7 +535,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
                     class_weight=self.class_weight,
                     n_samples_bootstrap=n_samples_bootstrap,
                     ### KF:
-                    chol_eps=chol_eps,
+                    chol_eps=self.chol_eps,
                     idx_tr=idx_tr,
                     bootstrap_type=self.bootstrap_type,
                     ###
