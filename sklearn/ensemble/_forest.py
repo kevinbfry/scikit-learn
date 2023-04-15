@@ -163,7 +163,8 @@ def _parallel_build_trees(
     ### KF:
     chol_eps=None,
     idx_tr=None,
-    bootstrap_type=None,
+    # bootstrap_type=None,
+    do_param_boot=False,
     ###
 ):
     """
@@ -179,12 +180,13 @@ def _parallel_build_trees(
         else:
             curr_sample_weight = sample_weight.copy()
 
-        if bootstrap_type == 'blur':
+        # if bootstrap_type == 'blur':
+        if do_param_boot:
             n_samples = X.shape[0]
-            if sample_weight is None:
-                curr_sample_weight = np.ones((n_samples,), dtype=np.float64)
-            else:
-                curr_sample_weight = sample_weight.copy()
+            # if sample_weight is None:
+            #     curr_sample_weight = np.ones((n_samples,), dtype=np.float64)
+            # else:
+            #     curr_sample_weight = sample_weight.copy()
 
             if chol_eps is None:
                 eps = np.random.randn(n_samples,1)
@@ -192,6 +194,7 @@ def _parallel_build_trees(
                 eps = np.random.randn(chol_eps.shape[0],1)
                 eps = chol_eps @ eps
 
+            ## TODO: shouldn't need this... should just update chol_eps before passing into this funciton...
             if idx_tr is None:
                 eps_tr = eps
             else:
@@ -250,7 +253,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
         warm_start=False,
         class_weight=None,
         max_samples=None,
-        bootstrap_type=None, ##KF
+        # bootstrap_type=None, ##KF
     ):
         super().__init__(
             base_estimator=base_estimator,
@@ -267,8 +270,8 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
         self.class_weight = class_weight
         self.max_samples = max_samples
 
-        ## KF:
-        self.bootstrap_type = bootstrap_type
+        # ## KF:
+        # self.bootstrap_type = bootstrap_type
 
     def apply(self, X):
         """
@@ -336,7 +339,7 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
 
         return sparse_hstack(indicators).tocsr(), n_nodes_ptr
 
-    def fit(self, X, y, sample_weight=None, chol_eps=None, idx_tr=None):
+    def fit(self, X, y, sample_weight=None, chol_eps=None, idx_tr=None, do_param_boot=False):
         """
         Build a forest of trees from the training set (X, y).
 
@@ -481,9 +484,10 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
             self.estimators_ = []
 
         ### KF:
-        self.chol_eps = chol_eps
+        # self.chol_eps = chol_eps
 
-        if self.bootstrap_type == 'blur' and not hasattr(self, "eps_"):
+        # if self.bootstrap_type == 'blur' and not hasattr(self, "eps_"):
+        if do_param_boot and not hasattr(self, "eps_"):
             self.eps_ = []
         ###
 
@@ -535,18 +539,23 @@ class BaseForest(MultiOutputMixin, BaseEnsemble, metaclass=ABCMeta):
                     class_weight=self.class_weight,
                     n_samples_bootstrap=n_samples_bootstrap,
                     ### KF:
-                    chol_eps=self.chol_eps,
+                    chol_eps=chol_eps,#self.chol_eps,
                     idx_tr=idx_tr,
-                    bootstrap_type=self.bootstrap_type,
+                    # bootstrap_type=self.bootstrap_type,
+                    do_param_boot=do_param_boot,
                     ###
                 )
                 for i, t in enumerate(trees)
             )
 
             ### KF:
-            if self.bootstrap_type == 'blur':
+            # if self.bootstrap_type == 'blur':
+            if do_param_boot:
                 trees, eps = zip(*trees)
                 self.eps_.extend(eps)
+            # else:
+            #     trees, boot_weights = zip(*trees)
+            #     self.boot_weights_.extend(boot_weights)
             ###
 
             # Collect newly grown trees
@@ -1009,7 +1018,7 @@ class ForestRegressor(RegressorMixin, BaseForest, metaclass=ABCMeta):
         verbose=0,
         warm_start=False,
         max_samples=None,
-        bootstrap_type=None, ##KF
+        # bootstrap_type=None, ##KF
     ):
         super().__init__(
             base_estimator,
@@ -1022,7 +1031,7 @@ class ForestRegressor(RegressorMixin, BaseForest, metaclass=ABCMeta):
             verbose=verbose,
             warm_start=warm_start,
             max_samples=max_samples,
-            bootstrap_type=bootstrap_type, ##KF
+            # bootstrap_type=bootstrap_type, ##KF
         )
 
     def predict(self, X):
@@ -1784,7 +1793,7 @@ class RandomForestRegressor(ForestRegressor):
         warm_start=False,
         ccp_alpha=0.0,
         max_samples=None,
-        bootstrap_type=None, ##KF
+        # bootstrap_type=None, ##KF
     ):
         super().__init__(
             base_estimator=DecisionTreeRegressor(),
@@ -1808,7 +1817,7 @@ class RandomForestRegressor(ForestRegressor):
             verbose=verbose,
             warm_start=warm_start,
             max_samples=max_samples,
-            bootstrap_type=bootstrap_type,
+            # bootstrap_type=bootstrap_type,
         )
 
         self.criterion = criterion

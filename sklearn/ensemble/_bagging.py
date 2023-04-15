@@ -68,7 +68,19 @@ def _generate_bagging_indices(
 
 
 def _parallel_build_estimators(
-    n_estimators, ensemble, X, y, sample_weight, seeds, total_n_estimators, chol_eps, idx_tr, verbose
+    n_estimators, 
+    ensemble, 
+    X, 
+    y, 
+    sample_weight, 
+    seeds, 
+    total_n_estimators, 
+    verbose, 
+    ### KF:
+    chol_eps=None, 
+    idx_tr=None, 
+    do_param_boot=False,
+    ###
 ):
     """Private function used to build a batch of estimators within a job."""
     # Retrieve settings
@@ -116,33 +128,36 @@ def _parallel_build_estimators(
             else:
                 curr_sample_weight = sample_weight.copy()
 
+            if bootstrap:
+                ### KF:
+                if do_param_boot:
+                    if chol_eps is None:
+                        eps = np.random.randn(n_samples)
+                    else:
+                        eps = np.random.randn(chol_eps.shape[0])
+                        eps = chol_eps @ eps
+
+                    if idx_tr is None:
+                        eps_tr = eps
+                    else:
+                        eps_tr = eps[idx_tr]
+
+                    # w = y.reshape((-1,1)) + eps_tr
+                    w = y + eps_tr
+
+                    # estimator.fit(X, w, sample_weight=curr_sample_weight, check_input=True)
+                    eps_list.append(eps)
+                else:
+                    sample_counts = np.bincount(indices, minlength=n_samples)
+                    curr_sample_weight *= sample_counts
+                ###
+            else:
+                not_indices_mask = ~indices_to_mask(indices, n_samples)
+                curr_sample_weight[not_indices_mask] = 0
+
             ### KF:
-            # if bootstrap:
-            #     sample_counts = np.bincount(indices, minlength=n_samples)
-            #     curr_sample_weight *= sample_counts
-            # else:
-            #     not_indices_mask = ~indices_to_mask(indices, n_samples)
-            #     curr_sample_weight[not_indices_mask] = 0
-
-            # estimator.fit(X[:, features], y, sample_weight=curr_sample_weight)
-
-            if chol_eps is None:
-                eps = np.random.randn(n_samples,1)
-            else:
-                eps = np.random.randn(chol_eps.shape[0],1)
-                eps = chol_eps @ eps
-
-            if idx_tr is None:
-                eps_tr = eps
-            else:
-                eps_tr = eps[idx_tr]
-
-            w = y.reshape((-1,1)) + eps_tr
-
-            estimator.fit(X, w, y, sample_weight=curr_sample_weight, check_input=True)
-            eps_list.append(eps)
+            estimator.fit(X[:, features], w if do_param_boot else y, sample_weight=curr_sample_weight)
             ###
-
         else:
             estimator.fit((X[indices])[:, features], y[indices])
 
@@ -255,6 +270,9 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
         n_jobs=None,
         random_state=None,
         verbose=0,
+        ### KF:
+        
+        ###
     ):
         super().__init__(base_estimator=base_estimator, n_estimators=n_estimators)
 
@@ -268,7 +286,8 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
         self.random_state = random_state
         self.verbose = verbose
 
-    def fit(self, X, y, chol_eps=None, idx_tr=None, sample_weight=None):
+    ### KF:
+    def fit(self, X, y, sample_weight=None, chol_eps=None, idx_tr=None, do_param_boot=False):
         """Build a Bagging ensemble of estimators from the training set (X, y).
 
         Parameters
@@ -301,13 +320,13 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
             multi_output=True,
         )
         ### KF:
-        return self._fit(X, y, chol_eps=chol_eps, idx_tr=idx_tr, max_samples=self.max_samples, sample_weight=sample_weight)
+        return self._fit(X, y, max_samples=self.max_samples, sample_weight=sample_weight, chol_eps=chol_eps, idx_tr=idx_tr, do_param_boot=do_param_boot)
         ###
 
     def _parallel_args(self):
         return {}
 
-    def _fit(self, X, y, chol_eps=None, idx_tr=None, max_samples=None, max_depth=None, sample_weight=None):
+    def _fit(self, X, y, max_samples=None, max_depth=None, sample_weight=None, chol_eps=None, idx_tr=None, do_param_boot=False):
         """Build a Bagging ensemble of estimators from the training
            set (X, y).
 
@@ -396,9 +415,11 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
             # Free allocated memory, if any
             self.estimators_ = []
             self.estimators_features_ = []
-            ### KF:
+
+        ### KF:
+        if do_param_boot and not hasattr(self, "eps_"):
             self.eps_ = []
-            ###
+        ###
 
         n_more_estimators = self.n_estimators - len(self.estimators_)
 
@@ -441,14 +462,17 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
                 sample_weight,
                 seeds[starts[i] : starts[i + 1]],
                 total_n_estimators,
+                verbose=self.verbose,
                 ### KF:
                 chol_eps=chol_eps,
                 idx_tr=idx_tr,
+                # bootstrap_type=bootstrap_type,
+                do_param_boot=do_param_boot,
                 ###
-                verbose=self.verbose,
             )
             for i in range(n_jobs)
         )
+
 
         # Reduce
         self.estimators_ += list(
@@ -458,9 +482,10 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
             itertools.chain.from_iterable(t[1] for t in all_results)
         )
         ### KF:
-        self.eps_ += list(
-            itertools.chain.from_iterable(t[2] for t in all_results)
-        )
+        if do_param_boot:
+            self.eps_ += list(
+                itertools.chain.from_iterable(t[2] for t in all_results)
+            )
         ###
 
         if self.oob_score:
