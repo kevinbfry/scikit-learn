@@ -143,7 +143,8 @@ def _parallel_build_estimators(
                         eps_tr = eps[idx_tr]
 
                     # w = y.reshape((-1,1)) + eps_tr
-                    w = y + eps_tr
+                    w = y.flatten() + eps_tr
+
 
                     # estimator.fit(X, w, sample_weight=curr_sample_weight, check_input=True)
                     eps_list.append(eps)
@@ -357,6 +358,7 @@ class BaseBagging(BaseEnsemble, metaclass=ABCMeta):
         self : object
             Fitted estimator.
         """
+        # print("start bagging fit")
         random_state = check_random_state(self.random_state)
 
         if sample_weight is not None:
