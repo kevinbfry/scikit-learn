@@ -60,11 +60,11 @@ https://github.com/scikit-learn/scikit-learn/issues
 
 Don't forget to include:
 
-  - steps (or better script) to reproduce,
+- steps (or better script) to reproduce,
 
-  - expected outcome,
+- expected outcome,
 
-  - observed outcome or Python (or gdb) tracebacks
+- observed outcome or Python (or gdb) tracebacks
 
 To help developers fix your bug faster, please link to a https://gist.github.com
 holding a standalone minimalistic python script that reproduces your bug and
@@ -91,7 +91,7 @@ Documentation resources
 
 This documentation is relative to |release|. Documentation for
 other versions can be found `here
-<http://scikit-learn.org/dev/versions.html>`__.
+<https://scikit-learn.org/dev/versions.html>`__.
 
 Printable pdf documentation for old versions can be found `here
 <https://sourceforge.net/projects/scikit-learn/files/documentation/>`_.
